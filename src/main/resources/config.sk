@@ -229,6 +229,11 @@ use type properties: true
 # You should only disable this if you are encountering issues with Skript being unable to figure out the properties,
 # and you should make an issue on SkriptLang's GitHub.
 
+allow url scripts: false
+# Whether Skript should be allowed to download and load scripts directly from URLs.
+# For security reasons, this is disabled by default. Enabling this allows you to use `sk reload <url>`
+# and similar loading syntaxes to execute scripts directly from the internet.
+
 disable hooks:
 	vault: false
 	regions:

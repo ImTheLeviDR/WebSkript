@@ -105,12 +105,23 @@ public class EffScriptFile extends Effect {
 		if (scripts) {
 			for (Script script : scriptExpression.getArray(event)) {
 				@Nullable File file = script.getConfig().getFile();
-				this.handle(file, script.getConfig().getFileName(), logHandler);
+				if (file == null) {
+					if (script.name().toLowerCase(java.util.Locale.ENGLISH).startsWith("http://") || script.name().toLowerCase(java.util.Locale.ENGLISH).startsWith("https://")) {
+						this.handleUrl(script.name(), logHandler);
+					}
+				} else {
+					this.handle(file, script.getConfig().getFileName(), logHandler);
+				}
 			}
 		} else {
 			String name = scriptNameExpression.getSingle(event);
-			if (name != null)
-				this.handle(ScriptLoader.getScriptFromName(name), name, logHandler);
+			if (name != null) {
+				if (name.toLowerCase(java.util.Locale.ENGLISH).startsWith("http://") || name.toLowerCase(java.util.Locale.ENGLISH).startsWith("https://")) {
+					this.handleUrl(name, logHandler);
+				} else {
+					this.handle(ScriptLoader.getScriptFromName(name), name, logHandler);
+				}
+			}
 		}
 		logHandler.close();
 	}
@@ -197,6 +208,32 @@ public class EffScriptFile extends Effect {
 				return; // don't need to unload if not loaded (avoid throwing error)
 			if (script != null)
 				ScriptLoader.unloadScript(script);
+		}
+	}
+
+	private void handleUrl(String name, OpenCloseable openCloseable) {
+		if (!ch.njol.skript.SkriptConfig.allowUrlScripts.value())
+			return;
+
+		Script script = ScriptLoader.getScriptByName(name);
+		switch (mark) {
+			case ENABLE:
+			case RELOAD:
+				if (script != null)
+					ScriptLoader.unloadScript(script);
+				try {
+					ScriptLoader.loadScriptFromUrl(new java.net.URL(name), openCloseable);
+				} catch (java.net.MalformedURLException e) {
+					Skript.exception(e, "Invalid URL for script: " + name);
+				}
+				break;
+			case UNLOAD:
+			case DISABLE:
+				if (script != null)
+					ScriptLoader.unloadScript(script);
+				break;
+			default:
+				assert false;
 		}
 	}
 

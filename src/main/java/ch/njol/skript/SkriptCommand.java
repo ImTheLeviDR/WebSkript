@@ -171,6 +171,27 @@ public class SkriptCommand implements CommandExecutor {
 					Aliases.clear();
 					Aliases.loadAsync().thenRun(() -> reloaded(sender, logHandler, timingLogHandler, "aliases"));
 				} else { // Reloading an individual Script or folder
+					String scriptName = StringUtils.join(args, " ", 1, args.length);
+					if (scriptName.toLowerCase(Locale.ENGLISH).startsWith("http://") || scriptName.toLowerCase(Locale.ENGLISH).startsWith("https://")) {
+						if (!SkriptConfig.allowUrlScripts.value()) {
+							Skript.error(sender, "URL scripts are disabled in the config.");
+							return true;
+						}
+						reloading(sender, "script", logHandler, scriptName);
+						Script script = ScriptLoader.getScriptByName(scriptName);
+						if (script != null)
+							ScriptLoader.unloadScript(script);
+						try {
+							ScriptLoader.loadScriptFromUrl(new java.net.URL(scriptName), OpenCloseable.combine(logHandler, timingLogHandler))
+								.thenAccept(scriptInfo ->
+									reloaded(sender, logHandler, timingLogHandler, "script", scriptName)
+								);
+						} catch (java.net.MalformedURLException e) {
+							Skript.error(sender, "Invalid URL: " + scriptName);
+						}
+						return true;
+					}
+
 					File scriptFile = getScriptFromArgs(sender, args);
 					if (scriptFile == null)
 						return true;
@@ -226,6 +247,32 @@ public class SkriptCommand implements CommandExecutor {
 						error(sender, "enable.all.io error", ExceptionUtils.toString(e));
 					}
 				} else {
+					String scriptName = StringUtils.join(args, " ", 1, args.length);
+					if (scriptName.toLowerCase(Locale.ENGLISH).startsWith("http://") || scriptName.toLowerCase(Locale.ENGLISH).startsWith("https://")) {
+						if (!SkriptConfig.allowUrlScripts.value()) {
+							Skript.error(sender, "URL scripts are disabled in the config.");
+							return true;
+						}
+						info(sender, "enable.single.enabling", scriptName);
+						if (ScriptLoader.getScriptByName(scriptName) != null) {
+							Skript.error(sender, "Script from " + scriptName + " is already loaded.");
+							return true;
+						}
+						try {
+							ScriptLoader.loadScriptFromUrl(new java.net.URL(scriptName), logHandler)
+								.thenAccept(scriptInfo -> {
+									if (logHandler.numErrors() == 0) {
+										info(sender, "enable.single.enabled", scriptName);
+									} else {
+										error(sender, "enable.single.error", scriptName, logHandler.numErrors());
+									}
+								});
+						} catch (java.net.MalformedURLException e) {
+							Skript.error(sender, "Invalid URL: " + scriptName);
+						}
+						return true;
+					}
+
 					File scriptFile = getScriptFromArgs(sender, args);
 					if (scriptFile == null)
 						return true;
@@ -291,6 +338,18 @@ public class SkriptCommand implements CommandExecutor {
 						error(sender, "disable.all.io error", ExceptionUtils.toString(e));
 					}
 				} else {
+					String scriptName = StringUtils.join(args, " ", 1, args.length);
+					if (scriptName.toLowerCase(Locale.ENGLISH).startsWith("http://") || scriptName.toLowerCase(Locale.ENGLISH).startsWith("https://")) {
+						Script script = ScriptLoader.getScriptByName(scriptName);
+						if (script == null) {
+							Skript.error(sender, "Script from " + scriptName + " is not currently loaded.");
+							return true;
+						}
+						ScriptLoader.unloadScript(script);
+						info(sender, "disable.single.disabled", scriptName);
+						return true;
+					}
+
 					File scriptFile = getScriptFromArgs(sender, args);
 					if (scriptFile == null) // TODO allow disabling deleted/renamed scripts
 						return true;

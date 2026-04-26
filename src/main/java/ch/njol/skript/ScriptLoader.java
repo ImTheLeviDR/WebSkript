@@ -116,8 +116,13 @@ public class ScriptLoader {
 		public int compare(Script s1, Script s2) {
 			File f1 = s1.getConfig().getFile();
 			File f2 = s2.getConfig().getFile();
-			if (f1 == null || f2 == null)
-				throw new IllegalArgumentException("Scripts will null config files cannot be sorted.");
+			if (f1 == null && f2 == null) {
+				return s1.name().compareToIgnoreCase(s2.name());
+			} else if (f1 == null) {
+				return 1;
+			} else if (f2 == null) {
+				return -1;
+			}
 
 			File f1Parent = f1.getParentFile();
 			File f2Parent = f2.getParentFile();
@@ -162,6 +167,52 @@ public class ScriptLoader {
 				return script;
 		}
 		return null;
+	}
+
+	/**
+	 * Searches through the loaded scripts to find the script loaded with the provided name.
+	 * @param name The name of the script to find (e.g. URL).
+	 * @return The script loaded with the provided name, or null if no script was found.
+	 */
+	@Nullable
+	public static Script getScriptByName(String name) {
+		synchronized (loadedScripts) {
+			for (Script script : loadedScripts) {
+				if (name.equalsIgnoreCase(script.name()))
+					return script;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Loads a Script from a URL.
+	 * @param url The URL to load from.
+	 * @param openCloseable An {@link OpenCloseable} that will be called before and after.
+	 */
+	public static CompletableFuture<ScriptInfo> loadScriptFromUrl(java.net.URL url, OpenCloseable openCloseable) {
+		Config config = loadStructure(url);
+		if (config == null) {
+			CompletableFuture<ScriptInfo> future = new CompletableFuture<>();
+			future.completeExceptionally(new IOException("Failed to load script structure from URL: " + url));
+			return future;
+		}
+		return loadScripts(Collections.singletonList(config), openCloseable);
+	}
+
+	/**
+	 * Creates a script structure from the provided URL.
+	 * @param url The URL to load from.
+	 * @return The loaded structure or null if an error occurred.
+	 */
+	@Nullable
+	private static Config loadStructure(java.net.URL url) {
+		try {
+			return loadStructure(url.openStream(), url.toString());
+		} catch (IOException e) {
+			Skript.error("Could not load script from URL " + url + ": " + ExceptionUtils.toString(e));
+			return null;
+		}
 	}
 
 	/**
@@ -660,7 +711,7 @@ public class ScriptLoader {
 	 */
 	// Whenever you call this method, make sure to also call PreScriptLoadEvent
 	private static LoadingScriptInfo loadScript(Config config) {
-		if (config.getFile() == null)
+		if (config.getFile() == null && !config.getFileName().toLowerCase(java.util.Locale.ENGLISH).startsWith("http"))
 			throw new IllegalArgumentException("A config must have a file to be loaded.");
 
 		ParserInstance parser = getParser();
@@ -713,16 +764,17 @@ public class ScriptLoader {
 			parser.setInactive();
 		}
 
+		// Add to loaded files to use for future reloads
+		loadedScripts.add(script);
+
 		// In always sync task, enable stuff
 		Callable<Void> callable = () -> {
 			// Remove the script from the disabled scripts list
 			File file = config.getFile();
-			assert file != null;
-			File disabledFile = new File(file.getParentFile(), DISABLED_SCRIPT_PREFIX + file.getName());
-			disabledScripts.remove(disabledFile);
-
-			// Add to loaded files to use for future reloads
-			loadedScripts.add(script);
+			if (file != null) {
+				File disabledFile = new File(file.getParentFile(), DISABLED_SCRIPT_PREFIX + file.getName());
+				disabledScripts.remove(disabledFile);
+			}
 
 			ScriptLoader.eventRegistry().events(ScriptInitEvent.class)
 					.forEach(event -> event.onInit(script));
@@ -831,10 +883,12 @@ public class ScriptLoader {
 	@Nullable
 	private static Config loadStructure(InputStream source, String name) {
 		try {
+			boolean isUrl = name.toLowerCase(java.util.Locale.ENGLISH).startsWith("http://") || name.toLowerCase(java.util.Locale.ENGLISH).startsWith("https://");
+			File file = isUrl ? null : Skript.getInstance().getDataFolder().toPath().resolve(Skript.SCRIPTSFOLDER).resolve(name).toFile().getCanonicalFile();
 			return new Config(
 				source,
 				name,
-				Skript.getInstance().getDataFolder().toPath().resolve(Skript.SCRIPTSFOLDER).resolve(name).toFile().getCanonicalFile(),
+				file,
 				true,
 				false,
 				":"
@@ -861,7 +915,7 @@ public class ScriptLoader {
 		for (Script script : scripts) {
 			if (!loadedScripts.contains(script))
 				throw new SkriptAPIException("The script at '" + script.getConfig().getPath() + "' is not loaded!");
-			if (script.getConfig().getFile() == null)
+			if (script.getConfig().getFile() == null && !script.name().toLowerCase(java.util.Locale.ENGLISH).startsWith("http"))
 				throw new IllegalArgumentException("A script must have a file to be unloaded.");
 		}
 
@@ -918,8 +972,9 @@ public class ScriptLoader {
 			script.invalidate();
 			loadedScripts.remove(script); // We just unloaded it, so...
 			File scriptFile = script.getConfig().getFile();
-			assert scriptFile != null;
-			disabledScripts.add(new File(scriptFile.getParentFile(), DISABLED_SCRIPT_PREFIX + scriptFile.getName()));
+			if (scriptFile != null) {
+				disabledScripts.add(new File(scriptFile.getParentFile(), DISABLED_SCRIPT_PREFIX + scriptFile.getName()));
+			}
 		}
 
 		return info;
@@ -959,8 +1014,21 @@ public class ScriptLoader {
 
 		List<Config> configs = new ArrayList<>();
 		for (Script script : scripts) {
-			//noinspection ConstantConditions - getFile should never return null
-			Config config = loadStructure(script.getConfig().getFile());
+			String name = script.name();
+			boolean isUrl = name.toLowerCase(java.util.Locale.ENGLISH).startsWith("http://") || name.toLowerCase(java.util.Locale.ENGLISH).startsWith("https://");
+			Config config;
+			if (isUrl) {
+				try {
+					config = loadStructure(new java.net.URL(name));
+				} catch (java.net.MalformedURLException e) {
+					Skript.error("Malformed URL during reload: " + name);
+					return CompletableFuture.completedFuture(new ScriptInfo());
+				}
+			} else {
+				//noinspection ConstantConditions - getFile should never return null
+				config = loadStructure(script.getConfig().getFile());
+			}
+
 			if (config == null)
 				return CompletableFuture.completedFuture(new ScriptInfo());
 			configs.add(config);

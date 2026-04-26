@@ -390,6 +390,9 @@ public class SkriptConfig {
 	public static final Option<Boolean> simplifySyntaxesOnParse = new Option<>("simplify syntax on parse", true)
 		.optional(true);
 
+	public static final Option<Boolean> allowUrlScripts = new Option<>("allow url scripts", false)
+		.optional(true);
+
 	/**
 	 * This should only be used in special cases
 	 */
