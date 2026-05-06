@@ -178,7 +178,7 @@ public class ScriptLoader {
 	public static Script getScriptByName(String name) {
 		synchronized (loadedScripts) {
 			for (Script script : loadedScripts) {
-				if (name.equalsIgnoreCase(script.name()))
+				if (name.equalsIgnoreCase(script.name()) || name.equalsIgnoreCase(script.getConfig().getFileName()))
 					return script;
 			}
 		}
