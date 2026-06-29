@@ -191,13 +191,21 @@ public class ScriptLoader {
 	 * @param openCloseable An {@link OpenCloseable} that will be called before and after.
 	 */
 	public static CompletableFuture<ScriptInfo> loadScriptFromUrl(java.net.URL url, OpenCloseable openCloseable) {
+		return loadScriptFromUrl(url, openCloseable, false);
+	}
+
+	/**
+	 * Loads a Script from a URL.
+	 * @param url The URL to load from.
+	 * @param openCloseable An {@link OpenCloseable} that will be called before and after.
+	 * @param forceSync If true, loading is performed synchronously on the current thread.
+	 *                  This must be used when the caller blocks the server thread waiting for the result.
+	 */
+	public static CompletableFuture<ScriptInfo> loadScriptFromUrl(java.net.URL url, OpenCloseable openCloseable, boolean forceSync) {
 		Config config = loadStructure(url);
-		if (config == null) {
-			CompletableFuture<ScriptInfo> future = new CompletableFuture<>();
-			future.completeExceptionally(new IOException("Failed to load script structure from URL: " + url));
-			return future;
-		}
-		return loadScripts(Collections.singletonList(config), openCloseable);
+		if (config == null)
+			return CompletableFuture.completedFuture(new ScriptInfo());
+		return loadScripts(Collections.singletonList(config), openCloseable, forceSync);
 	}
 
 	/**
@@ -465,6 +473,10 @@ public class ScriptLoader {
 	 * the generic of the {@link Supplier} parameter.
 	 */
 	private static <T> CompletableFuture<T> makeFuture(Supplier<T> supplier, OpenCloseable openCloseable) {
+		return makeFuture(supplier, openCloseable, false);
+	}
+
+	private static <T> CompletableFuture<T> makeFuture(Supplier<T> supplier, OpenCloseable openCloseable, boolean forceSync) {
 		CompletableFuture<T> future = new CompletableFuture<>();
 		Runnable task = () -> {
 			try {
@@ -484,7 +496,7 @@ public class ScriptLoader {
 			}
 		};
 
-		if (isAsync() && Bukkit.isPrimaryThread()) {
+		if (!forceSync && isAsync() && Bukkit.isPrimaryThread()) {
 			loadQueue.add(task);
 		} else {
 			task.run();
@@ -506,7 +518,11 @@ public class ScriptLoader {
 	 *                         each individual script load (see {@link #makeFuture(Supplier, OpenCloseable)}).
 	 */
 	public static CompletableFuture<ScriptInfo> loadScripts(File file, OpenCloseable openCloseable) {
-		return loadScripts(loadStructures(file), openCloseable);
+		return loadScripts(loadStructures(file), openCloseable, false);
+	}
+
+	public static CompletableFuture<ScriptInfo> loadScripts(File file, OpenCloseable openCloseable, boolean forceSync) {
+		return loadScripts(loadStructures(file), openCloseable, forceSync);
 	}
 
 	/**
@@ -521,7 +537,7 @@ public class ScriptLoader {
 			.sorted()
 			.map(ScriptLoader::loadStructures)
 			.flatMap(List::stream)
-			.collect(Collectors.toList()), openCloseable);
+			.collect(Collectors.toList()), openCloseable, false);
 	}
 
 	/**
@@ -536,6 +552,10 @@ public class ScriptLoader {
 	 */
 	@SuppressWarnings("removal")
 	private static CompletableFuture<ScriptInfo> loadScripts(List<Config> configs, OpenCloseable openCloseable) {
+		return loadScripts(configs, openCloseable, false);
+	}
+
+	private static CompletableFuture<ScriptInfo> loadScripts(List<Config> configs, OpenCloseable openCloseable, boolean forceSync) {
 		if (configs.isEmpty()) // Nothing to load
 			return CompletableFuture.completedFuture(new ScriptInfo());
 
@@ -554,11 +574,11 @@ public class ScriptLoader {
 				throw new NullPointerException();
 
 			CompletableFuture<Void> future = makeFuture(() -> {
-				LoadingScriptInfo info = loadScript(config);
+				LoadingScriptInfo info = loadScript(config, forceSync);
 				scripts.add(info);
 				scriptInfo.add(new ScriptInfo(1, info.structures.size()));
 				return null;
-			}, openCloseable);
+			}, openCloseable, forceSync);
 
 			scriptInfoFutures.add(future);
 		}
@@ -711,6 +731,10 @@ public class ScriptLoader {
 	 */
 	// Whenever you call this method, make sure to also call PreScriptLoadEvent
 	private static LoadingScriptInfo loadScript(Config config) {
+		return loadScript(config, false);
+	}
+
+	private static LoadingScriptInfo loadScript(Config config, boolean forceSync) {
 		if (config.getFile() == null && !config.getFileName().toLowerCase(java.util.Locale.ENGLISH).startsWith("http"))
 			throw new IllegalArgumentException("A config must have a file to be loaded.");
 
@@ -780,7 +804,7 @@ public class ScriptLoader {
 					.forEach(event -> event.onInit(script));
 			return null;
 		};
-		if (isAsync()) { // Need to delegate to main thread
+		if (isAsync() && !forceSync) { // Need to delegate to main thread
 			Task.callSync(callable);
 		} else { // We are in main thread, execute immediately
 			try {

@@ -1,0 +1,18 @@
+options:
+	path: "../../../../../../src/test/skript/tests/"
+
+test "reload script without errors":
+	set {_path} to {@path} + "misc/dummy.sk"
+	if reload script named {_path} does not have errors:
+		assert size of errors is 0 with "successful reload should produce no errors"
+	else:
+		assert false with "dummy.sk should reload without errors"
+
+test "reload script with errors":
+	set {_path} to {@path} + "misc/broken-syntax.sk"
+	if reload script named {_path} has errors:
+		assert size of errors > 0 with "broken script should produce errors"
+		set {_errors::*} to errors
+		assert size of {_errors::*} > 0 with "errors should be storable in a list"
+	else:
+		assert false with "broken-syntax.sk should fail to reload"

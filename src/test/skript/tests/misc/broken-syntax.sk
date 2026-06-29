@@ -1,0 +1,3 @@
+command /broken-load-test:
+	trigger:
+		this is definitely not valid skript
